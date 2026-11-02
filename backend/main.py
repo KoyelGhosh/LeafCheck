@@ -4,8 +4,9 @@ from PIL import Image
 import io
 import json
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
-from torchvision import transforms
+from torchvision import transforms, models
 
 app = FastAPI(title="LeafCheck API")
 
@@ -25,14 +26,23 @@ except FileNotFoundError:
     print("Warning: class_indices.json not found. Run in the same directory as the file.")
     CLASS_NAMES = [f"Class_{i}" for i in range(38)]
 
-# 2. Load the PyTorch Model
+# 2. Load the PyTorch Model Architecture and Weights
 try:
     # Use GPU if available, otherwise fallback to CPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # Load the model directly
-    model = torch.load("plant_mobilenet_v2.pth", map_location=device, weights_only=False)
+    # Build the empty MobileNetV2 architecture
+    model = models.mobilenet_v2(weights=None)
     
+    # Modify the final classification layer to output 38 classes instead of 1000
+    num_features = model.classifier[1].in_features
+    model.classifier[1] = nn.Linear(num_features, 38)
+    
+    # Load the saved weights (state_dict) into the architecture
+    state_dict = torch.load("plant_mobilenet_v2.pth", map_location=device, weights_only=True)
+    model.load_state_dict(state_dict)
+    
+    model.to(device)
     # Set model to evaluation mode (disables dropout, fixes batch norm)
     model.eval() 
     MODEL_LOADED = True
