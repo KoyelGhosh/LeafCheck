@@ -9,7 +9,8 @@ import { Header, History, HowItWorks, PhotoTips, DiseaseLibrary, Faq, Footer } f
 // Leave it empty to run in demo mode with random sample predictions.
 // API contract: POST multipart/form-data, field "file"
 // -> { "predictions": [ { "label": "Tomato___Late_blight", "confidence": 0.91 } ] }
-const API_URL = import.meta.env.VITE_API_URL || "";
+// const API_URL = import.meta.env.VITE_API_URL || "";
+const API_URL = "https://leafcheck.onrender.com/predict";
 const MAX_MB = 8;
 const IDLE_NOTE = `JPG or PNG, up to ${MAX_MB} MB. Good light and a plain background give the best results.`;
  
@@ -64,7 +65,10 @@ async function predict(file) {
   body.append("file", file);
   const res = await fetch(API_URL, { method: "POST", body });
   if (!res.ok) throw new Error(`Request failed: ${res.status}`);
-  return (await res.json()).predictions;
+  //return (await res.json()).predictions;
+  const preds = (await res.json()).predictions;
+  const scale = Math.max(...preds.map((p) => p.confidence)) > 1 ? 100 : 1;
+  return preds.map((p) => ({ ...p, confidence: p.confidence / scale }));
 }
  
 function parseLabel(label) {
