@@ -1,19 +1,18 @@
 
-
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import { findDisease } from "./data.js";
 import { Header, History, HowItWorks, PhotoTips, DiseaseLibrary, Faq, Footer } from "./Sections.jsx";
- 
-// Set VITE_API_URL in .env (e.g. VITE_API_URL=http://localhost:8000/predict).
-// Leave it empty to run in demo mode with random sample predictions.
+
+// Backend address. Uses VITE_API_URL from .env if you set one,
+// otherwise the deployed Render server.
 // API contract: POST multipart/form-data, field "file"
 // -> { "predictions": [ { "label": "Tomato___Late_blight", "confidence": 0.91 } ] }
-// const API_URL = import.meta.env.VITE_API_URL || "";
-const API_URL = "https://leafcheck.onrender.com/predict";
+// Set API_URL to "" to run in demo mode with random sample predictions.
+const API_URL = import.meta.env.VITE_API_URL || "https://leafcheck.onrender.com/predict";
 const MAX_MB = 8;
 const IDLE_NOTE = `JPG or PNG, up to ${MAX_MB} MB. Good light and a plain background give the best results.`;
- 
+
 const CARE = {
   healthy: [
     "No treatment needed.",
@@ -35,13 +34,43 @@ const CARE = {
     "Remove affected leaves.",
     "Use a labelled fungicide if it keeps spreading.",
   ],
+  Bacterial_spot: [
+    "Remove badly spotted leaves and avoid touching wet plants.",
+    "Water at the base so leaves stay dry.",
+    "Use disease-free seed next season and rotate crops.",
+  ],
+  Septoria_leaf_spot: [
+    "Remove infected lower leaves and clear plant debris.",
+    "Mulch to stop soil splashing onto leaves.",
+    "Rotate crops and use a labelled fungicide if it spreads.",
+  ],
+  Leaf_scorch: [
+    "Remove affected leaves and clear fallen debris.",
+    "Water at the base and improve airflow around plants.",
+    "Use a labelled fungicide if it keeps spreading.",
+  ],
+  Common_rust: [
+    "Remove heavily infected leaves where practical.",
+    "Plant resistant varieties next season.",
+    "Use a labelled fungicide early if the rust spreads.",
+  ],
+  Apple_scab: [
+    "Rake and remove fallen leaves.",
+    "Prune for airflow so leaves dry faster.",
+    "Use a labelled fungicide in spring if needed.",
+  ],
+  Black_rot: [
+    "Remove infected leaves and any shriveled fruit.",
+    "Prune for airflow and keep vines off the ground.",
+    "Use a labelled fungicide during wet weather.",
+  ],
   default: [
     "Isolate the plant from healthy ones.",
     "Remove the worst affected leaves.",
     "Confirm with a local agriculture extension officer before treating.",
   ],
 };
- 
+
 const DEMO_LABELS = [
   "Tomato___Late_blight",
   "Tomato___Early_blight",
@@ -51,7 +80,7 @@ const DEMO_LABELS = [
   "Apple___healthy",
   "Corn_(maize)___Common_rust_",
 ];
- 
+
 async function predict(file) {
   if (!API_URL) {
     await new Promise((r) => setTimeout(r, 2400));
@@ -65,19 +94,20 @@ async function predict(file) {
   body.append("file", file);
   const res = await fetch(API_URL, { method: "POST", body });
   if (!res.ok) throw new Error(`Request failed: ${res.status}`);
-  //return (await res.json()).predictions;
   const preds = (await res.json()).predictions;
+  if (!Array.isArray(preds) || preds.length === 0) throw new Error("No predictions returned");
+  // Accept confidence as a fraction (0.91) or a percentage (91)
   const scale = Math.max(...preds.map((p) => p.confidence)) > 1 ? 100 : 1;
   return preds.map((p) => ({ ...p, confidence: p.confidence / scale }));
 }
- 
+
 function parseLabel(label) {
   const [plant, rawCond = ""] = label.split("___");
   const clean = (s) => s.replace(/_/g, " ").replace(/\(.*?\)/g, "").trim();
   const cond = rawCond.replace(/_$/, "");
   return { plant: clean(plant), cond, name: cond === "healthy" ? "Healthy" : clean(cond) };
 }
- 
+
 function Leaf({ className }) {
   return (
     <svg className={className} viewBox="0 0 120 120" aria-hidden="true">
@@ -86,12 +116,12 @@ function Leaf({ className }) {
     </svg>
   );
 }
- 
+
 function UploadPanel({ preview, scanning, note, noteIsError, canAnalyze, onFile, onAnalyze, onClear }) {
   const inputRef = useRef(null);
   const [drag, setDrag] = useState(false);
   const open = () => inputRef.current?.click();
- 
+
   return (
     <section className="panel" aria-label="Leaf photo">
       <div
@@ -125,16 +155,15 @@ function UploadPanel({ preview, scanning, note, noteIsError, canAnalyze, onFile,
         <span className="corner c3" /><span className="corner c4" />
         <span className="beam" />
       </div>
- 
+
       <input
         ref={inputRef}
         className="sr"
         type="file"
         accept="image/*"
-        capture="environment"
         onChange={(e) => onFile(e.target.files[0])}
       />
- 
+
       <div className="row">
         <button className="primary" disabled={!canAnalyze} onClick={onAnalyze}>Analyze leaf</button>
         <button className="ghost" disabled={!canAnalyze} onClick={onClear}>Clear photo</button>
@@ -143,18 +172,18 @@ function UploadPanel({ preview, scanning, note, noteIsError, canAnalyze, onFile,
     </section>
   );
 }
- 
+
 function ResultPanel({ preds }) {
   const [animate, setAnimate] = useState(false);
   const [copied, setCopied] = useState(false);
- 
+
   useEffect(() => {
     setAnimate(false);
     if (!preds) return;
     const id = requestAnimationFrame(() => requestAnimationFrame(() => setAnimate(true)));
     return () => cancelAnimationFrame(id);
   }, [preds]);
- 
+
   if (!preds) {
     return (
       <div className="empty">
@@ -163,7 +192,7 @@ function ResultPanel({ preds }) {
       </div>
     );
   }
- 
+
   const sorted = [...preds].sort((a, b) => b.confidence - a.confidence).slice(0, 3);
   const top = parseLabel(sorted[0].label);
   const healthy = top.cond === "healthy";
@@ -176,31 +205,35 @@ function ResultPanel({ preds }) {
   const tips = CARE[healthy ? "healthy" : top.cond] || CARE.default;
   const info = findDisease(sorted[0].label);
   const copy = async () => {
-    const text = `LeafCheck: ${top.plant} - ${top.name} (${Math.round(sorted[0].confidence * 100)}% match)\nNext steps: ${tips.join(" ")}`;
-    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch {}
+    const text = `LeafCheck: ${top.name} (${Math.round(sorted[0].confidence * 100)}% match)\nNext steps: ${tips.join(" ")}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {}
   };
- 
+
   return (
     <>
       <div className="verdict">
         <h2>{top.name}</h2>
         <span className={`badge ${tone}`}>{badge}</span>
       </div>
-      <p className="plant">{top.plant} · {Math.round(sorted[0].confidence * 100)}% match</p>
- 
+      <p className="plant">{Math.round(sorted[0].confidence * 100)}% match</p>
+
       <ul className="bars">
         {sorted.map((p) => {
           const q = parseLabel(p.label);
           const pct = Math.round(p.confidence * 100);
           return (
             <li key={p.label}>
-              <div className="t"><span>{q.plant}: {q.name}</span><span>{pct}%</span></div>
+              <div className="t"><span>{q.name}</span><span>{pct}%</span></div>
               <div className="bar"><i style={{ width: animate ? `${pct}%` : 0 }} /></div>
             </li>
           );
         })}
       </ul>
- 
+
       <div className="care">
         <h3>{healthy ? "Keeping it healthy" : "What to do next"}</h3>
         <ul>{tips.map((t) => <li key={t}>{t}</li>)}</ul>
@@ -218,7 +251,7 @@ function ResultPanel({ preds }) {
     </>
   );
 }
- 
+
 export default function App() {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState("");
@@ -229,14 +262,15 @@ export default function App() {
   const [history, setHistory] = useState(() => {
     try { return JSON.parse(localStorage.getItem("leafcheck-history")) || []; } catch { return []; }
   });
+
   useEffect(() => {
     try { localStorage.setItem("leafcheck-history", JSON.stringify(history)); } catch {}
   }, [history]);
- 
+
   useEffect(() => () => preview && URL.revokeObjectURL(preview), [preview]);
- 
+
   const say = (text, isErr = false) => { setNote(text); setNoteIsError(isErr); };
- 
+
   const handleFile = (f) => {
     if (!f) return;
     if (!f.type.startsWith("image/")) return say("That file is not an image. Choose a JPG or PNG.", true);
@@ -246,31 +280,39 @@ export default function App() {
     setPreds(null);
     say(f.name);
   };
- 
+
   const handleClear = () => {
     setFile(null);
     setPreview("");
     setPreds(null);
     say(IDLE_NOTE);
   };
- 
+
   const handleAnalyze = async () => {
     if (!file) return;
     setScanning(true);
     say("Analyzing leaf…");
+    // The free Render server sleeps when idle, so the first request can be slow
+    const slowTimer = setTimeout(
+      () => say("The server is waking up. The first scan can take up to a minute…"),
+      6000
+    );
     try {
       const result = await predict(file);
       setPreds(result);
       const best = [...result].sort((a, b) => b.confidence - a.confidence)[0];
-      setHistory((h) => [{ label: best.label, confidence: best.confidence, time: Date.now(), demo: !API_URL }, ...h].slice(0, 6));
+      setHistory((h) =>
+        [{ label: best.label, confidence: best.confidence, time: Date.now(), demo: !API_URL }, ...h].slice(0, 6)
+      );
       say(API_URL ? "Done." : "Demo mode: these results are sample data, not a real diagnosis.");
     } catch {
       say("Could not analyze the photo. Check your connection and try again.", true);
     } finally {
+      clearTimeout(slowTimer);
       setScanning(false);
     }
   };
- 
+
   return (
     <>
       <Header />
@@ -311,4 +353,4 @@ export default function App() {
     </>
   );
 }
- 
+
